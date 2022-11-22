@@ -31,7 +31,7 @@ int heatsim_init(heatsim_t* heatsim, unsigned int dim_x, unsigned int dim_y) {
      */
 
     int dims[2] = {dim_x, dim_y}; // peut etre unsigned int
-    int periods[2] = {1, 0};
+    int periods[2] = {1, 1};
     MPI_Cart_create(MPI_COMM_WORLD, 2, dims, periods, 1,&heatsim->communicator);
 
     MPI_Comm_rank(heatsim->communicator, &heatsim->rank);
@@ -147,7 +147,7 @@ grid_t* heatsim_receive_grid(heatsim_t* heatsim) {
     MPI_Irecv(&p_t, 1, parametres_type, 0, 0, heatsim->communicator, &request1);
     MPI_Wait(&request1, MPI_STATUS_IGNORE);
 
-    MPI_Irecv(&d_t, p_t->width*p_t->height, data_type, 0, 0, heatsim->communicator, &request2);
+    MPI_Irecv(&d_t, p_t.width*p_t.height, data_type, 0, 0, heatsim->communicator, &request2);
     MPI_Wait(&request2, MPI_STATUS_IGNORE);
 
 
@@ -165,7 +165,42 @@ int heatsim_exchange_borders(heatsim_t* heatsim, grid_t* grid) {
     //send
     
 
+    MPI_Datatype vector_type;
 
+    MPI_Datatype contig_type;
+
+    MPI_Type_vector(grid->height, 1, grid->width, MPI_DOUBLE, &vector_type);
+
+    MPI_Type_contiguous(grid->width, MPI_DOUBLE, &contig_type);
+
+
+    MPI_Type_commit(&vector_type);
+    MPI_Type_commit(&contig_type);
+
+
+    //send north
+    MPI_Isend(grid_get_cell(grid,0,0), 1, contig_type, heatsim->rank_north_peer, 0, heatsim->communicator, &request[0]);
+    //send south
+    MPI_Isend(grid_get_cell(grid,0,grid->height-1), 1, contig_type, heatsim->rank_south_peer, 0, heatsim->communicator, &request[1]);
+    //send east
+    MPI_Isend(grid_get_cell(grid,grid->width-1,0), 1, vector_type, heatsim->rank_east_peer, 0, heatsim->communicator, &request[2]);
+    //send west
+    MPI_Isend(grid_get_cell(grid,0,0), 1, vector_type, heatsim->rank_west_peer, 0, heatsim->communicator, &request[3]);
+
+    //recv north
+    MPI_Irecv(grid_get_cell(grid,0,-1), 1, contig_type, heatsim->rank_south_peer, 0, heatsim->communicator, &request[4]);
+    //recv south
+    MPI_Irecv(grid_get_cell(grid,0,grid->height), 1, contig_type, heatsim->rank_north_peer, 0, heatsim->communicator, &request[5]);
+    //recv east
+    MPI_Irecv(grid_get_cell(grid,grid->width,0), 1, vector_type, heatsim->rank_west_peer, 0, heatsim->communicator, &request[6]);
+    //recv west
+    MPI_Irecv(grid_get_cell(grid,-1,0), 1, vector_type, heatsim->rank_east_peer, 0, heatsim->communicator, &request[7]);
+
+
+    //zait
+    for (int i = 0; i < 8; i++){
+        MPI_Wait(&request[i], MPI_STATUS_IGNORE);
+    }
 
     /*
      * TODO: Échange les bordures de `grid`, excluant le rembourrage, dans le
@@ -221,6 +256,23 @@ int heatsim_send_result(heatsim_t* heatsim, grid_t* grid) {
      *       `grid` n'a aucun rembourage (padding = 0);
      */
 
+
+    struct parametres_s p_t;
+    struct data_s d_t;
+    
+     
+    p_t.width = grid->width;
+    p_t.height = grid->height;
+    p_t.padding = grid->padding;
+    d_t.data = grid->data;
+
+    MPI_Request request;
+
+    MPI_Isend(&p_t, 1, parametres_type, 0, 0, heatsim->communicator, &request);
+    MPI_Wait(&request, MPI_STATUS_IGNORE);
+    MPI_Isend(&d_t, 1, data_type, 0, 0, heatsim->communicator, &request);
+
+
     return 0;
 }
 
@@ -232,6 +284,31 @@ int heatsim_receive_results(heatsim_t* heatsim, cart2d_t* cart) {
      *       Utilisez `cart2d_get_grid` pour obtenir la `grid` à une coordonnée
      *       qui va recevoir le contenue (`data`) d'un autre noeud.
      */
+
+    struct parametres_s p_t;
+    struct data_s d_t;
+
+    
+    for (int i = 1; i< heatsim->rank_count; i++){
+        MPI_Request request;
+        MPI_Irecv(&p_t, 1, parametres_type, i, 0, heatsim->communicator, &request);
+        MPI_Wait(&request, MPI_STATUS_IGNORE);
+        MPI_Irecv(&d_t, 1, data_type, i, 0, heatsim->communicator, &request);
+        MPI_Wait(&request, MPI_STATUS_IGNORE);
+
+        int coords[2];
+        MPI_Cart_coords(heatsim->communicator, i, 2, coords);
+        grid_t *grid = cart2d_get_grid(cart, coords[0], coords[1]);
+
+        grid->width = p_t.width;
+        grid->height = p_t.height;
+        grid->padding = p_t.padding;
+        grid->data = d_t.data;
+    }
+
+
+   
+
 
     return 0;
 }
