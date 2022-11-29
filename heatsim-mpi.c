@@ -11,11 +11,6 @@ struct parametres_s {
 
 };
 
-struct data_s {
-
-    double *data;
-
-};
 
 static MPI_Datatype parametres_type;
 static MPI_Datatype data_type;
@@ -71,17 +66,16 @@ int heatsim_init(heatsim_t* heatsim, unsigned int dim_x, unsigned int dim_y) {
 
     // data datatype
 
-    MPI_Datatype d_fields[1] = {MPI_DOUBLE};
-    int d_blocklen[1] = {1};
-    MPI_Aint d_displ[1];
-    d_displ[0] = offsetof(struct data_s, data);
-
+    MPI_Datatype d_fields[] = {MPI_DOUBLE};
+    int d_blocklen[] = {1};
+    MPI_Aint d_displ[] = { 0};
+ 
     MPI_Type_create_struct(1, d_blocklen, d_displ, d_fields, &data_type);
 
     MPI_Type_commit(&data_type);
 
 
-
+return 0;
 fail_exit:
     return -1;
 }
@@ -100,8 +94,7 @@ int heatsim_send_grids(heatsim_t* heatsim, cart2d_t* cart) {
      *       Utilisez `cart2d_get_grid` pour obtenir la `grid` à une coordonnée.
      */
     struct parametres_s p_t;
-    struct data_s d_t;
-    
+
     for (int i = 1; i < heatsim->rank_count; i++ ){
             int coords[2];
             MPI_Cart_coords(heatsim->communicator, i, 2, coords);
@@ -110,13 +103,15 @@ int heatsim_send_grids(heatsim_t* heatsim, cart2d_t* cart) {
             p_t.width = grid->width;
             p_t.height = grid->height;
             p_t.padding = grid->padding;
-            d_t.data = grid->data;
+
+            //printf("rank 0 sending to rank %d, w:%d h:%d p:%d\n", i , p_t.width, p_t.height, p_t.padding);
 
             MPI_Request request;
 
             MPI_Isend(&p_t, 1, parametres_type, i, 0, heatsim->communicator, &request);
             MPI_Wait(&request, MPI_STATUS_IGNORE);
-            MPI_Isend(&d_t, 1, data_type, i, 0, heatsim->communicator, &request);
+            MPI_Isend(grid->data, grid->width * grid->height, data_type, i, 0, heatsim->communicator, &request);
+            //MPI_Wait(&request, MPI_STATUS_IGNORE);
 
         
     }
@@ -138,21 +133,21 @@ grid_t* heatsim_receive_grid(heatsim_t* heatsim) {
      */
 
     struct parametres_s p_t;
-    struct data_s d_t;
 
     MPI_Request request1;
     MPI_Request request2;
 
 
+
     MPI_Irecv(&p_t, 1, parametres_type, 0, 0, heatsim->communicator, &request1);
     MPI_Wait(&request1, MPI_STATUS_IGNORE);
 
-    MPI_Irecv(&d_t, p_t.width*p_t.height, data_type, 0, 0, heatsim->communicator, &request2);
+    grid_t *grid = grid_create(p_t.width, p_t.height, p_t.padding);
+
+    MPI_Irecv(grid->data, grid->width * grid->height, data_type, 0, 0, heatsim->communicator, &request2);
     MPI_Wait(&request2, MPI_STATUS_IGNORE);
 
-
-    grid_t *grid = grid_create(p_t.width, p_t.height, p_t.padding);
-    grid_set(grid, *d_t.data);
+    //printf("rank %d receiving, w:%d h:%d p:%d\n", heatsim->rank , p_t.width, p_t.height, p_t.padding);
 
     return grid;
 }
@@ -164,19 +159,19 @@ int heatsim_exchange_borders(heatsim_t* heatsim, grid_t* grid) {
 
     //send
     
+    
 
     MPI_Datatype vector_type;
 
     MPI_Datatype contig_type;
 
-    MPI_Type_vector(grid->height, 1, grid->width, MPI_DOUBLE, &vector_type);
+    MPI_Type_vector(grid->height, 1, grid->width_padded, MPI_DOUBLE, &vector_type);
 
     MPI_Type_contiguous(grid->width, MPI_DOUBLE, &contig_type);
 
 
     MPI_Type_commit(&vector_type);
     MPI_Type_commit(&contig_type);
-
 
     //send north
     MPI_Isend(grid_get_cell(grid,0,0), 1, contig_type, heatsim->rank_north_peer, 0, heatsim->communicator, &request[0]);
@@ -188,19 +183,23 @@ int heatsim_exchange_borders(heatsim_t* heatsim, grid_t* grid) {
     MPI_Isend(grid_get_cell(grid,0,0), 1, vector_type, heatsim->rank_west_peer, 0, heatsim->communicator, &request[3]);
 
     //recv north
-    MPI_Irecv(grid_get_cell(grid,0,-1), 1, contig_type, heatsim->rank_south_peer, 0, heatsim->communicator, &request[4]);
+    MPI_Irecv(grid_get_cell(grid,0,-1), 1, contig_type, heatsim->rank_north_peer, 0, heatsim->communicator, &request[4]);
+
     //recv south
-    MPI_Irecv(grid_get_cell(grid,0,grid->height), 1, contig_type, heatsim->rank_north_peer, 0, heatsim->communicator, &request[5]);
+    MPI_Irecv(grid_get_cell(grid,0,grid->height), 1, contig_type, heatsim->rank_south_peer, 0, heatsim->communicator, &request[5]);
     //recv east
-    MPI_Irecv(grid_get_cell(grid,grid->width,0), 1, vector_type, heatsim->rank_west_peer, 0, heatsim->communicator, &request[6]);
+    MPI_Irecv(grid_get_cell(grid,grid->width,0), 1, vector_type, heatsim->rank_east_peer, 0, heatsim->communicator, &request[6]);
     //recv west
-    MPI_Irecv(grid_get_cell(grid,-1,0), 1, vector_type, heatsim->rank_east_peer, 0, heatsim->communicator, &request[7]);
+    MPI_Irecv(grid_get_cell(grid,-1,0), 1, vector_type, heatsim->rank_west_peer, 0, heatsim->communicator, &request[7]);
 
 
     //zait
     for (int i = 0; i < 8; i++){
         MPI_Wait(&request[i], MPI_STATUS_IGNORE);
     }
+
+    //printf("rank %d sending to %d\n", heatsim->rank, heatsim->rank_north_peer);
+
 
     /*
      * TODO: Échange les bordures de `grid`, excluant le rembourrage, dans le
@@ -258,19 +257,14 @@ int heatsim_send_result(heatsim_t* heatsim, grid_t* grid) {
 
 
     struct parametres_s p_t;
-    struct data_s d_t;
-    
      
     p_t.width = grid->width;
     p_t.height = grid->height;
     p_t.padding = grid->padding;
-    d_t.data = grid->data;
 
-    MPI_Request request;
 
-    MPI_Isend(&p_t, 1, parametres_type, 0, 0, heatsim->communicator, &request);
-    MPI_Wait(&request, MPI_STATUS_IGNORE);
-    MPI_Isend(&d_t, 1, data_type, 0, 0, heatsim->communicator, &request);
+    MPI_Send(&p_t, 1, parametres_type, 0, 0, heatsim->communicator);
+    MPI_Send(grid->data, grid->width* grid->height, data_type, 0, 0, heatsim->communicator);
 
 
     return 0;
@@ -286,24 +280,25 @@ int heatsim_receive_results(heatsim_t* heatsim, cart2d_t* cart) {
      */
 
     struct parametres_s p_t;
-    struct data_s d_t;
 
     
     for (int i = 1; i< heatsim->rank_count; i++){
-        MPI_Request request;
-        MPI_Irecv(&p_t, 1, parametres_type, i, 0, heatsim->communicator, &request);
-        MPI_Wait(&request, MPI_STATUS_IGNORE);
-        MPI_Irecv(&d_t, 1, data_type, i, 0, heatsim->communicator, &request);
-        MPI_Wait(&request, MPI_STATUS_IGNORE);
-
         int coords[2];
-        MPI_Cart_coords(heatsim->communicator, i, 2, coords);
-        grid_t *grid = cart2d_get_grid(cart, coords[0], coords[1]);
 
+        
+        MPI_Cart_coords(heatsim->communicator, i, 2, coords);
+        MPI_Status request;
+        MPI_Recv(&p_t, 1, parametres_type, i, 0, heatsim->communicator, &request);
+
+        grid_t *grid = cart2d_get_grid(cart, coords[0], coords[1]);
         grid->width = p_t.width;
         grid->height = p_t.height;
         grid->padding = p_t.padding;
-        grid->data = d_t.data;
+
+   
+        MPI_Recv(grid->data, grid->width * grid->height, data_type, i, 0, heatsim->communicator, &request);
+
+        
     }
 
 
