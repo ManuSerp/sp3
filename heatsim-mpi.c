@@ -174,23 +174,22 @@ int heatsim_exchange_borders(heatsim_t* heatsim, grid_t* grid) {
     MPI_Type_commit(&contig_type);
 
     //send north
-    MPI_Isend(grid_get_cell(grid,0,0), 1, contig_type, heatsim->rank_north_peer, 0, heatsim->communicator, &request[0]);
+    MPI_Isend(grid_get_cell(grid,0,0), 1, contig_type, heatsim->rank_north_peer, 1, heatsim->communicator, &request[0]);
     //send south
-    MPI_Isend(grid_get_cell(grid,0,grid->height-1), 1, contig_type, heatsim->rank_south_peer, 0, heatsim->communicator, &request[1]);
+    MPI_Isend(grid_get_cell(grid,0,grid->height-1), 1, contig_type, heatsim->rank_south_peer, 2, heatsim->communicator, &request[1]);
     //send east
-    MPI_Isend(grid_get_cell(grid,grid->width-1,0), 1, vector_type, heatsim->rank_east_peer, 0, heatsim->communicator, &request[2]);
+    MPI_Isend(grid_get_cell(grid,grid->width-1,0), 1, vector_type, heatsim->rank_east_peer, 3, heatsim->communicator, &request[2]);
     //send west
-    MPI_Isend(grid_get_cell(grid,0,0), 1, vector_type, heatsim->rank_west_peer, 0, heatsim->communicator, &request[3]);
+    MPI_Isend(grid_get_cell(grid,0,0), 1, vector_type, heatsim->rank_west_peer, 4, heatsim->communicator, &request[3]);
 
     //recv north
-    MPI_Irecv(grid_get_cell(grid,0,-1), 1, contig_type, heatsim->rank_north_peer, 0, heatsim->communicator, &request[4]);
-
+    MPI_Irecv(grid_get_cell(grid,0,-1), 1, contig_type, heatsim->rank_north_peer, 2, heatsim->communicator, &request[4]);
     //recv south
-    MPI_Irecv(grid_get_cell(grid,0,grid->height), 1, contig_type, heatsim->rank_south_peer, 0, heatsim->communicator, &request[5]);
+    MPI_Irecv(grid_get_cell(grid,0,grid->height), 1, contig_type, heatsim->rank_south_peer, 1, heatsim->communicator, &request[5]);
     //recv east
-    MPI_Irecv(grid_get_cell(grid,grid->width,0), 1, vector_type, heatsim->rank_east_peer, 0, heatsim->communicator, &request[6]);
+    MPI_Irecv(grid_get_cell(grid,grid->width,0), 1, vector_type, heatsim->rank_east_peer, 4, heatsim->communicator, &request[6]);
     //recv west
-    MPI_Irecv(grid_get_cell(grid,-1,0), 1, vector_type, heatsim->rank_west_peer, 0, heatsim->communicator, &request[7]);
+    MPI_Irecv(grid_get_cell(grid,-1,0), 1, vector_type, heatsim->rank_west_peer, 3, heatsim->communicator, &request[7]);
 
 
     //zait
